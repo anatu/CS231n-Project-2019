@@ -10,11 +10,9 @@ from torchvision import datasets, models, transforms
 import sys
 sys.path.insert(0, '../utils')
 from dataloader import load_data
-from viz import *
-import matplotlib
-#matplotlib.use('tkagg')
+from viz import show_confusion_mat, imshow, create_grid_for_mb
 import matplotlib.pyplot as plt
-plt.ion()
+#plt.ion()
 
 class VGG(object):
 
@@ -41,8 +39,7 @@ class VGG(object):
         num_features = self.model.classifier[6].in_features
         features = list(self.model.classifier.children())[:-1]                  # Remove last layer
         features.extend([nn.Linear(num_features, num_classes).to(self.device)]) # Add final linear layer
-
-        self.model.classifier = nn.Sequential(*features) #.to(self.device)   # Replace the model classifier
+        self.model.classifier = nn.Sequential(*features)                  # Replace the model classifier
 
         
 
@@ -137,28 +134,29 @@ class VGG(object):
         
         print("Evaluating model on {} set".format(mode_str))
         print('-' * 10)
-        
-        for i, data in enumerate(dataloaders[mode]):
-            if i % 100 == 0:
-                print("\r{} batch {}/{}".format(mode_str, i, num_batches), end='', flush=True)
+
+        with torch.no_grad():
+            for i, data in enumerate(dataloaders[mode]):
+                if i % 100 == 0:
+                    print("\r{} batch {}/{}".format(mode_str, i, num_batches), end='', flush=True)
                 
-            self.model.train(False)
-            self.model.eval()
+                self.model.train(False)
+                self.model.eval()
 
-            inputs, labels = data
-            inputs = inputs.to(self.device)
-            labels = labels.to(self.device)
-                                
-            outputs = self.model(inputs)
-
-            _, preds = torch.max(outputs.data, 1)
-            loss = self.loss_fn(outputs, labels)
-
-            total_loss += loss.item() * inputs.size(0)
-            total_correct += torch.sum(preds == labels.data)
+                inputs, labels = data
+                inputs = inputs.to(self.device)
+                labels = labels.to(self.device)
+                
+                outputs = self.model(inputs)
+                
+                _, preds = torch.max(outputs.data, 1)
+                loss = self.loss_fn(outputs, labels)
+                
+                total_loss += loss.item() * inputs.size(0)
+                total_correct += torch.sum(preds == labels.data)
             
-            del inputs, labels, outputs, preds
-            torch.cuda.empty_cache()
+                del inputs, labels, outputs, preds
+                torch.cuda.empty_cache()
             
         avg_loss = total_loss / dataset_sizes[mode]
         avg_acc = total_correct.double() / dataset_sizes[mode]
@@ -192,7 +190,8 @@ class VGG(object):
         ''' Function to visualize the model predictions.
         Takes in the parameter num_images, the number of images to display 
         in each minibatch. num_images should be a square number
-        for easy plotting of an N x N grid of images.
+        for easy plotting of an N x N grid of images. 
+        Also computes and plots the confusion matrix.
         Saves the visualizations to a sibling folder.
         '''
         
@@ -201,8 +200,9 @@ class VGG(object):
         self.model.eval()
         
         images_so_far = 0
-        file_path_base = "./vgg_visuals/predictions_"
-
+        file_path_base = "./vgg_visuals/"
+        confusion_matrix = torch.zeros(self.num_classes, self.num_classes)
+                                                   
         with torch.no_grad():
             for i, data in enumerate(dataloaders['val']):
                 inputs, labels = data
@@ -211,29 +211,19 @@ class VGG(object):
                 inputs = inputs.to(device)
                 labels = labels.to(device)
                 
-                outputs = self.model(inputs)
-                
+                outputs = self.model(inputs)                
                 _, preds = torch.max(outputs, 1)
-                predicted_labels = [preds[j] for j in range(inputs.size()[0])]
 
-                images_so_far = 0
-                
-                for j in range(inputs.size()[0]):
-                    images_so_far += 1
-                    ax = plt.subplot(np.sqrt(num_images), np.sqrt(num_images), images_so_far)
-                    ax.axis('off')
-                    ax.set_title('predicted: {}'.format(class_names[preds[j]]), fontsize = 'x-small')
-                    imshow(inputs.cpu().data[j])
-                    plt.show()
-
-                    if images_so_far >= num_images:
-                        plt.savefig("./vgg_visuals/predictions_" + str(i) + ".png")
-                        return
+                for t, p in zip(labels.view(-1), preds.view(-1)):
+                    confusion_matrix[t.long(), p.long()] += 1
                     
-                plt.savefig(file_path_base + str(i) + ".png")    
+                # Create and save grid of prediction images for each minibatch
+                create_grid_for_mb(i, inputs, num_images, class_names, preds, labels, file_path_base)
 
-            
-        
+        # Plot the confusion matrix
+        show_confusion_mat(confusion_matrix, self.num_classes, class_names, outfile=file_path_base + "confusion_mat.png")
+                
+                
 
     
 if __name__ == "__main__":
@@ -250,15 +240,15 @@ if __name__ == "__main__":
     
     # Initialize the model
     vgg_model = VGG(vgg16, device, num_classes=7)
-
+    
     # Train the last layer of the model
-    vgg_model.train(dataloaders, dataset_sizes, num_epochs=15)
+    ## vgg_model.train(dataloaders, dataset_sizes, num_epochs=15)
     
     # Or load from saved weights from previously retrained model
-    ## vgg_model.load_model("./best_model_weights.pt", train_mode = False)
+    vgg_model.load_model("./best_model_weights.pt", train_mode = False)
     
     # Some visualizations
-    ## vgg_model.visualize_model(num_images=36)
+    vgg_model.visualize_model(num_images=25)
 
     # Can use eval_model method to evaluate the model after training
     ## vgg_model.eval_model(dataloaders, mode = 'val')
