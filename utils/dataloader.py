@@ -86,9 +86,9 @@ def split_train_val_test():
     waste_types = ['cardboard','glass','metal','paper','plastic','trash', 'compost']
     
     
-    inBase = "Documents/GitHub/CS231n-Project-2019/datasets/trashnet/dataset-resized"
+    inBase = "Documents/GitHub/CS231n-Project-2019/datasets/trashnet/data/dataset-resized"
     inDataPath = os.path.join(userPath, inBase)
-    outBase = "Documents/GitHub/CS231n-Project-2019/datasets/trashnet/data"
+    outBase = "Documents/GitHub/CS231n-Project-2019/datasets/trashnet/data/dataset-split"
     outDataPath = os.path.join(userPath, outBase)
 
 
@@ -106,7 +106,7 @@ def split_train_val_test():
     for waste_type in waste_types:
         source_folder = os.path.join(inDataPath,waste_type)
         train_ind, valid_ind, test_ind = split_indices(source_folder,1,1)
-        
+
         ## move source files to train
         train_names = get_names(waste_type,train_ind)
         train_source_files = [os.path.join(source_folder,name) for name in train_names]
