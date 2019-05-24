@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 
 class VGG(object):
 
-    def __init__(self, pretrained_model, device, num_classes=6, lr=0.0001, reg=0.0, dtype=np.float32):
+    def __init__(self, pretrained_model, device, num_classes=7, lr=0.0001, reg=0.0, dtype=np.float32):
         '''
         Initialize a new network based on VGG architecture
         '''
@@ -29,19 +29,18 @@ class VGG(object):
         self.lr = lr
         self.loss_fn = nn.CrossEntropyLoss()
         self.device = device
-        self.save_model_path = "./best_model_weights.pt"
+        self.save_model_path = "./model_weights/best_model_weights_vgg.pt"
         
         # Freeze all original layers 
         for param in self.model.features.parameters():
             param.require_grad = False
-        
-        # Remove last fully connected layer and replace with layer with 6 output classes
+
+        # Remove last fully connected layer and replace with layer with 7 output classes
         num_features = self.model.classifier[6].in_features
         features = list(self.model.classifier.children())[:-1]                  # Remove last layer
         features.extend([nn.Linear(num_features, num_classes).to(self.device)]) # Add final linear layer
         self.model.classifier = nn.Sequential(*features)                  # Replace the model classifier
 
-        
 
 
     def train(self, dataloaders, dataset_sizes, num_epochs = 25):
@@ -55,7 +54,7 @@ class VGG(object):
         best_acc = 0.0
 
         optimizer = optim.Adam(self.model.parameters(), lr = self.lr)
-        exp_lr_scheduler = lr_scheduler.StepLR(optimizer_conv, step_size=7, gamma=0.1) #decay lr by factor of 0.1 every 7 ep  
+        #exp_lr_scheduler = lr_scheduler.StepLR(optimizer_conv, step_size=7, gamma=0.1) #decay lr by factor of 0.1 every 7 ep  
 
         for epoch in range(0, num_epochs):
             print("Epoch {}/{}".format(epoch, num_epochs-1))
@@ -229,8 +228,8 @@ class VGG(object):
 if __name__ == "__main__":
     
     # Load the data
-    #pathname = "/Users/sarahciresi/Documents/GitHub/CS231n-Project-2019/datasets/trashnet/data"
-    pathname = "/home/sarahciresi/gcloud/project/CS231n-Project-2019/datasets/trashnet/data"
+    #pathname = "/Users/sarahciresi/Documents/GitHub/CS231n-Project-2019/datasets/trashnet/data/dataset-split"
+    pathname = "/home/sarahciresi/gcloud/project/CS231n-Project-2019/datasets/trashnet/data/dataset-split"
          
     dataloaders, dataset_sizes, class_names = load_data(pathname)
 
@@ -242,13 +241,13 @@ if __name__ == "__main__":
     vgg_model = VGG(vgg16, device, num_classes=7)
     
     # Train the last layer of the model
-    ## vgg_model.train(dataloaders, dataset_sizes, num_epochs=15)
+    ## vgg_model.train(dataloaders, dataset_sizes, num_epochs=20)
     
     # Or load from saved weights from previously retrained model
-    vgg_model.load_model("./best_model_weights.pt", train_mode = False)
+    ## vgg_model.load_model("./best_model_weights.pt", train_mode = False)
     
     # Some visualizations
-    vgg_model.visualize_model(num_images=25)
+    ## vgg_model.visualize_model(num_images=25)
 
     # Can use eval_model method to evaluate the model after training
     ## vgg_model.eval_model(dataloaders, mode = 'val')
