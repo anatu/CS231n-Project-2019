@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 
 class MobileNet(object):
 
-    def __init__(self, pretrained_path, device, num_classes=7, lr=0.0001, reg=0.0, dtype=np.float32):
+    def __init__(self, pretrained_path, device, num_classes=7, lr=0.0001, reg=0.0, dtype=np.float32, mode="ft_extract"):
         '''
         Initialize a new network based on the MobileNet architecture.
         Uses the MobileNetV2 implementation adapted for PyTorch.
@@ -36,18 +36,43 @@ class MobileNet(object):
         self.model = MobileNetV2(n_class=1000, device=self.device)
         self.model.load_state_dict(state_dict)
 
-        # Freeze all original layers
-        for param in self.model.features.parameters():
-            param.require_grad = False
-
+        # Set the .require_grad attributes appropriately depending on if finetuning or feature extracting
+        self.set_parameter_requires_grad(mode)
+                
         # Remove last fully connected layer and replace with layer with 7 output classes
         num_features = self.model.classifier[1].in_features
         features = list(self.model.classifier.children())[:-1]                  # Remove last layer
         features.extend([nn.Linear(num_features, num_classes).to(self.device)]) # Add final linear layer
         self.model.classifier = nn.Sequential(*features)                  # Replace the model classifier
+
+
+    def set_parameter_requires_grad(self, mode):
+        ''' Helper function that sets the .required_grad attribute of parameters of the model.
+        Takes in the mode parameter which can be: 1. "ft_extract"  2. "finetune_last"  3. "finetune_all"
+        If "ft_extract", freezes all original layers of the network.   
+        If "finetune_last", only finetunes the layers 10-19  of the network, keeping the first 9 frozen.  
+        If "finetune_all", finetunes all layers of the network, so no .requires_grad setting is necessary.
+        '''
+        if mode == "ft_extract":
+            for param in self.model.parameters():
+                param.requires_grad = False
+        elif mode == "finetune_last":
+            for param in self.model.features[:10].parameters():
+                param.requires_grad = False
+
+
+    def gather_optimizable_params(self):
+        ''' Helper function to gather the parameters to be optimized based on the desired mode,
+        set in set_parameter_requires_grad during initialization. 
+        '''
+        params_to_optimize = []
+        for name, param in self.model.named_parameters():
+            if param.requires_grad == True:
+                params_to_optimize.append(param)
         
-        
-                                                                 
+        return params_to_optimize
+
+                
     def train(self, dataloaders, dataset_sizes, num_epochs = 25):
         ''' Function to train the model. Takes as input:                                                         
         - dataloaders:     dataloaders for the train and validation datasets                                       
@@ -56,8 +81,11 @@ class MobileNet(object):
         '''
         best_model_wts = copy.deepcopy(self.model.state_dict())
         best_acc = 0.0
+
+        params_to_optimize = self.gather_optimizable_params()
+        optimizer = optim.Adam(params_to_optimize, lr = self.lr)
+        exp_lr_scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
         
-        optimizer = optim.Adam(self.model.parameters(), lr = self.lr)
         for epoch in range(0, num_epochs):
             print("Epoch {}/{}".format(epoch, num_epochs-1))
             print('-'*10)
@@ -65,7 +93,7 @@ class MobileNet(object):
             for mode in ['train', 'val']:
                 # Set model to  the appropriate mode
                 if mode == "train":
-                    #scheduler.step()
+                    exp_lr_scheduler.step()
                     self.model.train()
                 else:
                     self.model.eval()
@@ -187,11 +215,11 @@ class MobileNet(object):
 
     def visualize_model(self, num_images=16):
         ''' Function to visualize the model predictions.                                     
-        Takes in the parameter num_images, the number of images to display                 
-        in each minibatch. num_images should be a square number                  
-        for easy plotting of an N x N grid of images.                                                                                    
-        Also computes and plots the confusion matrix.                                                                                
-        Saves the visualizations to a sibling folder.                                                                                 
+        Takes in the parameter num_images, the number of images to display 
+        in each minibatch. num_images should be a square number
+        for easy plotting of an N x N grid of images.   
+        Also computes and plots the confusion matrix. 
+        Saves the visualizations to a sibling folder. 
         '''
         
         # Set model for evaluation
@@ -199,7 +227,7 @@ class MobileNet(object):
         self.model.eval()
         
         images_so_far = 0
-        file_path_base = "./mobilenet_visuals/"
+        file_path_base = "./visuals/mobilenet_visuals/"
         confusion_matrix = torch.zeros(self.num_classes, self.num_classes)
         
         with torch.no_grad():
@@ -234,16 +262,16 @@ if __name__ == "__main__":
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     
     # Initialize the model using weights from pretrained network
-    mobilenet_model = MobileNet('mobilenet_v2.pth.tar',  device, num_classes=7)
+    mobilenet_model = MobileNet('mobilenet_v2.pth.tar',  device, num_classes=7, mode="finetune_all")
 
     # Train the last layer of the model
-    mobilenet_model.train(dataloaders, dataset_sizes, num_epochs=5)
+    mobilenet_model.train(dataloaders, dataset_sizes, num_epochs=20)
     
     # Or load from saved weights from previously retrained model
-    ## mobilenet_model.load_model("./best_model_weights.pt_mb", train_mode = False)
-
+    ##mobilenet_model.load_model("./model_weights/best_model_weights_mb.pt", train_mode = False)
+    
     # Some visualizations
-    mobilenet_model.visualize_model(num_images=25)
+    ##mobilenet_model.visualize_model(num_images=25)
 
     # Can use eval_model method to evaluate the model after training
     ## mobilenet_model.eval_model(dataloaders, mode = 'val')

@@ -12,11 +12,11 @@ sys.path.insert(0, '../utils')
 from dataloader import load_data
 from viz import show_confusion_mat, imshow, create_grid_for_mb
 import matplotlib.pyplot as plt
-#plt.ion()
+
 
 class VGG(object):
 
-    def __init__(self, pretrained_model, device, num_classes=7, lr=0.0001, reg=0.0, dtype=np.float32):
+    def __init__(self, pretrained_model, device, num_classes=7, lr=0.0001, reg=0.0, dtype=np.float32, mode="ft_extract"):
         '''
         Initialize a new network based on VGG architecture
         '''
@@ -31,18 +31,44 @@ class VGG(object):
         self.device = device
         self.save_model_path = "./model_weights/best_model_weights_vgg.pt"
         
-        # Freeze all original layers 
-        for param in self.model.features.parameters():
-            param.require_grad = False
-
+        # Depending on whether the model will be used as a fixed feature extractor or will be fine-tuned,
+        # set the parameter .require_grad attributes appropriately
+        self.set_parameter_requires_grad(mode)
+            
         # Remove last fully connected layer and replace with layer with 7 output classes
         num_features = self.model.classifier[6].in_features
         features = list(self.model.classifier.children())[:-1]                  # Remove last layer
         features.extend([nn.Linear(num_features, num_classes).to(self.device)]) # Add final linear layer
         self.model.classifier = nn.Sequential(*features)                  # Replace the model classifier
+                            
+    def set_parameter_requires_grad(self, mode):
+        ''' Helper function that sets the .required_grad attribute of parameters of the model.
+        Takes in the mode parameter which can be: 1. "ft_extract"  2. "finetune_last"  3. "finetune_all"
+        If "ft_extract", freezes all original layers of the network.
+        If "finetune_last", only finetunes the last 8 layers of the network and keeps first 9 frozen.
+        If "finetune_all", finetunes all layers of the network, so no .requires_grad setting is necessary.
+        '''
 
+        if mode == "ft_extract":
+            for param in self.model.features.parameters():
+                param.requires_grad = False
+        elif mode == "finetune_last":
+            for param in self.model.features[:19].parameters():
+                param.requires_grad = False
+        
+                
+    def gather_optimizable_params(self):
+        ''' Helper function to gather the parameters to be optimized based on the desired mode, 
+        set in set_parameter_requires_grad during initialization.
+        '''
+        params_to_optimize = []
+        for name, param in self.model.named_parameters():
+            if param.requires_grad == True:
+                params_to_optimize.append(param)
 
+        return params_to_optimize
 
+    
     def train(self, dataloaders, dataset_sizes, num_epochs = 25):
         ''' Function to train the model. Takes as input:
         - dataloaders:     dataloaders for the train and validation datasets
@@ -53,8 +79,9 @@ class VGG(object):
         best_model_wts = copy.deepcopy(self.model.state_dict())
         best_acc = 0.0
 
-        optimizer = optim.Adam(self.model.parameters(), lr = self.lr)
-        #exp_lr_scheduler = lr_scheduler.StepLR(optimizer_conv, step_size=7, gamma=0.1) #decay lr by factor of 0.1 every 7 ep  
+        params_to_optimize = self.gather_optimizable_params()
+        optimizer = optim.Adam(params_to_optimize, lr = self.lr)
+        exp_lr_scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
 
         for epoch in range(0, num_epochs):
             print("Epoch {}/{}".format(epoch, num_epochs-1))
@@ -63,7 +90,7 @@ class VGG(object):
             for mode in ['train', 'val']:
                 # Set model to  the appropriate mode
                 if mode == "train":
-                    #scheduler.step()
+                    exp_lr_scheduler.step()
                     self.model.train()
                 else:
                     self.model.eval() 
@@ -185,7 +212,7 @@ class VGG(object):
         return self.model
 
 
-    def visualize_model(self, num_images=16):
+    def visualize_model(self, dataloaders, num_images=16):
         ''' Function to visualize the model predictions.
         Takes in the parameter num_images, the number of images to display 
         in each minibatch. num_images should be a square number
@@ -199,7 +226,7 @@ class VGG(object):
         self.model.eval()
         
         images_so_far = 0
-        file_path_base = "./vgg_visuals/"
+        file_path_base = "./visuals/vgg_visuals/"
         confusion_matrix = torch.zeros(self.num_classes, self.num_classes)
                                                    
         with torch.no_grad():
@@ -238,17 +265,17 @@ if __name__ == "__main__":
     vgg16 = models.vgg16(pretrained=True).to(device)
     
     # Initialize the model
-    vgg_model = VGG(vgg16, device, num_classes=7)
+    vgg_model = VGG(vgg16, device, num_classes=7, mode="finetune_all") #t_extract")
     
     # Train the last layer of the model
-    ## vgg_model.train(dataloaders, dataset_sizes, num_epochs=20)
+    vgg_model.train(dataloaders, dataset_sizes, num_epochs=20)
     
     # Or load from saved weights from previously retrained model
-    ## vgg_model.load_model("./best_model_weights.pt", train_mode = False)
+    ## vgg_model.load_model("./model_weights/best_model_weights_vgg.pt", train_mode = False)
     
     # Some visualizations
-    ## vgg_model.visualize_model(num_images=25)
-
+    ## vgg_model.visualize_model(dataloaders, num_images=25)
+    
     # Can use eval_model method to evaluate the model after training
     ## vgg_model.eval_model(dataloaders, mode = 'val')
     
@@ -260,15 +287,4 @@ if __name__ == "__main__":
 # https://www.kaggle.com/carloalbertobarbano/vgg16-transfer-learning-pytorch
 # https://medium.com/@14prakash/almost-any-image-classification-problem-using-pytorch-i-am-in-love-with-pytorch-26c7aa979ec4
 
-'''
-### Other models ###
-resnet18 = models.resnet18(pretrained=True)
-alexnet = models.alexnet(pretrained=True)
-squeezenet = models.squeezenet1_0(pretrained=True)
-vgg16 = models.vgg16(pretrained=True)
-densenet = models.densenet161(pretrained=True)
-inception = models.inception_v3(pretrained=True)
-googlenet = models.googlenet(pretrained=True)
-shufflenet = models.shufflenetv2(pretrained=True)
-####
-'''
+
